@@ -5,11 +5,11 @@ defmodule Ecto.ParameterizedTypeTest do
     use Ecto.ParameterizedType
 
     def params(embed), do: %{embed: embed}
-    def init([some_opt: :some_opt_value, field: :my_type, schema: _]), do: :init
+    def init(params), do: params
     def type(_), do: :custom
-    def load(_, _, _), do: {:ok, :load}
-    def dump(_, _, _),  do: {:ok, :dump}
-    def cast(_, _),  do: {:ok, :cast}
+    def load(_, _, params), do: {:ok, {:load, params}}
+    def dump(_, _, params), do: {:ok, {:dump, params}}
+    def cast(_, params), do: {:ok, {:cast, params}}
     def equal?(true, _, _), do: true
     def equal?(_, _, _), do: false
     def embed_as(_, %{embed: embed}), do: embed
@@ -31,8 +31,8 @@ defmodule Ecto.ParameterizedTypeTest do
     def init(_), do: %{}
     def type(_), do: :custom
     def load(_, _, _), do: :error
-    def dump(_, _, _),  do: :error
-    def cast(_, _),  do: :error
+    def dump(_, _, _), do: :error
+    def cast(_, _), do: :error
     def equal?(true, _, _), do: true
     def equal?(_, _, _), do: false
     def embed_as(_, _), do: :self
@@ -40,7 +40,10 @@ defmodule Ecto.ParameterizedTypeTest do
 
   test "init" do
     assert Schema.__schema__(:type, :my_type) ==
-      {:parameterized, Ecto.ParameterizedTypeTest.MyParameterizedType, :init}
+             {:parameterized, Ecto.ParameterizedTypeTest.MyParameterizedType,
+              some_opt: :some_opt_value,
+              field: :my_type,
+              schema: Ecto.ParameterizedTypeTest.Schema}
   end
 
   @p_dump_type {:parameterized, MyParameterizedType, MyParameterizedType.params(:dump)}
@@ -55,26 +58,27 @@ defmodule Ecto.ParameterizedTypeTest do
     assert Ecto.Type.embed_as(@p_self_type, :foo) == :self
     assert Ecto.Type.embed_as(@p_dump_type, :foo) == :dump
 
-    assert Ecto.Type.embedded_load(@p_self_type, :foo, :json) == {:ok, :cast}
-    assert Ecto.Type.embedded_load(@p_self_type, nil,  :json) == {:ok, :cast}
-    assert Ecto.Type.embedded_load(@p_dump_type, :foo, :json) == {:ok, :load}
-    assert Ecto.Type.embedded_load(@p_dump_type, nil,  :json) == {:ok, :load}
+    assert Ecto.Type.embedded_load(@p_self_type, :foo, :json) == {:ok, {:cast, %{embed: :self}}}
+    assert Ecto.Type.embedded_load(@p_self_type, nil, :json) == {:ok, {:cast, %{embed: :self}}}
+    assert Ecto.Type.embedded_load(@p_dump_type, :foo, :json) == {:ok, {:load, %{embed: :dump}}}
+    assert Ecto.Type.embedded_load(@p_dump_type, nil, :json) == {:ok, {:load, %{embed: :dump}}}
 
-    assert Ecto.Type.embedded_dump(@p_self_type, :foo,  :json) == {:ok, :foo}
+    assert Ecto.Type.embedded_dump(@p_self_type, :foo, :json) == {:ok, :foo}
     assert Ecto.Type.embedded_dump(@p_self_type, nil, :json) == {:ok, nil}
-    assert Ecto.Type.embedded_dump(@p_dump_type, :foo,  :json) == {:ok, :dump}
-    assert Ecto.Type.embedded_dump(@p_dump_type, nil, :json) == {:ok, :dump}
+    assert Ecto.Type.embedded_dump(@p_dump_type, :foo, :json) == {:ok, {:dump, %{embed: :dump}}}
+    assert Ecto.Type.embedded_dump(@p_dump_type, nil, :json) == {:ok, {:dump, %{embed: :dump}}}
 
-    assert Ecto.Type.load(@p_self_type, :foo) == {:ok, :load}
-    assert Ecto.Type.load(@p_self_type, nil) == {:ok, :load}
+    assert Ecto.Type.load(@p_self_type, :foo) == {:ok, {:load, %{embed: :self}}}
+    assert Ecto.Type.load(@p_self_type, nil) == {:ok, {:load, %{embed: :self}}}
 
-    assert Ecto.Type.dump(@p_self_type, :foo) == {:ok, :dump}
-    assert Ecto.Type.dump(@p_self_type, nil) == {:ok, :dump}
+    assert Ecto.Type.dump(@p_self_type, :foo) == {:ok, {:dump, %{embed: :self}}}
+    assert Ecto.Type.dump(@p_self_type, nil) == {:ok, {:dump, %{embed: :self}}}
 
-    assert Ecto.Type.cast(@p_self_type, :foo) == {:ok, :cast}
-    assert Ecto.Type.cast(@p_self_type, nil) == {:ok, :cast}
+    assert Ecto.Type.cast(@p_self_type, :foo) == {:ok, {:cast, %{embed: :self}}}
+    assert Ecto.Type.cast(@p_self_type, nil) == {:ok, {:cast, %{embed: :self}}}
 
-    assert Ecto.Type.format({:parameterized, MyParameterizedType, :format}) == "#MyParameterizedType<:format>"
+    assert Ecto.Type.format({:parameterized, MyParameterizedType, :format}) ==
+             "#MyParameterizedType<:format>"
   end
 
   test "on error" do
@@ -83,9 +87,9 @@ defmodule Ecto.ParameterizedTypeTest do
     assert Ecto.Type.embed_as(@p_error_type, :foo) == :self
 
     assert Ecto.Type.embedded_load(@p_error_type, :foo, :json) == :error
-    assert Ecto.Type.embedded_load(@p_error_type, nil,  :json) == :error
+    assert Ecto.Type.embedded_load(@p_error_type, nil, :json) == :error
 
-    assert Ecto.Type.embedded_dump(@p_error_type, :foo,  :json) == {:ok, :foo}
+    assert Ecto.Type.embedded_dump(@p_error_type, :foo, :json) == {:ok, :foo}
     assert Ecto.Type.embedded_dump(@p_error_type, nil, :json) == {:ok, nil}
 
     assert Ecto.Type.load(@p_error_type, :foo) == :error
@@ -103,81 +107,174 @@ defmodule Ecto.ParameterizedTypeTest do
     assert Ecto.Type.embed_as({:array, @p_dump_type}, :foo) == :dump
     assert Ecto.Type.embed_as({:array, @p_error_type}, :foo) == :self
 
-    assert Ecto.Type.embedded_load({:array, @p_self_type}, [:foo], :json) == {:ok, [:cast]}
-    assert Ecto.Type.embedded_load({:array, @p_self_type}, [nil], :json) == {:ok, [:cast]}
-    assert Ecto.Type.embedded_load({:array, @p_self_type}, nil, :json) == {:ok, nil}
-    assert Ecto.Type.embedded_load({:array, @p_dump_type}, [:foo], :json) == {:ok, [:load]}
-    assert Ecto.Type.embedded_load({:array, @p_dump_type}, [nil], :json) == {:ok, [:load]}
-    assert Ecto.Type.embedded_load({:array, @p_dump_type}, nil, :json) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:array, @p_self_type}, [:foo], :json) ==
+             {:ok, [{:cast, %{embed: :self}}]}
 
-    assert Ecto.Type.embedded_dump({:array, @p_self_type}, [:foo], :json) == {:ok, [:foo]}
-    assert Ecto.Type.embedded_dump({:array, @p_self_type}, [nil], :json) == {:ok, [nil]}
-    assert Ecto.Type.embedded_dump({:array, @p_self_type}, nil, :json) == {:ok, nil}
-    assert Ecto.Type.embedded_dump({:array, @p_dump_type}, [:foo], :json) == {:ok, [:dump]}
-    assert Ecto.Type.embedded_dump({:array, @p_dump_type}, [nil], :json) == {:ok, [:dump]}
-    assert Ecto.Type.embedded_dump({:array, @p_dump_type}, nil, :json) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:array, @p_self_type}, [nil], :json) ==
+             {:ok, [{:cast, %{embed: :self}}]}
 
-    assert Ecto.Type.load({:array, @p_self_type}, [:foo]) == {:ok, [:load]}
-    assert Ecto.Type.load({:array, @p_self_type}, [nil]) == {:ok, [:load]}
-    assert Ecto.Type.load({:array, @p_self_type}, nil) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:array, @p_self_type}, nil, :json) ==
+             {:ok, nil}
 
-    assert Ecto.Type.dump({:array, @p_self_type}, [:foo]) == {:ok, [:dump]}
-    assert Ecto.Type.dump({:array, @p_self_type}, [nil]) == {:ok, [:dump]}
-    assert Ecto.Type.dump({:array, @p_self_type}, nil) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:array, @p_dump_type}, [:foo], :json) ==
+             {:ok, [{:load, %{embed: :dump}}]}
 
-    assert Ecto.Type.cast({:array, @p_self_type}, [:foo]) == {:ok, [:cast]}
-    assert Ecto.Type.cast({:array, @p_self_type}, [nil]) == {:ok, [:cast]}
-    assert Ecto.Type.cast({:array, @p_self_type}, nil) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:array, @p_dump_type}, [nil], :json) ==
+             {:ok, [{:load, %{embed: :dump}}]}
+
+    assert Ecto.Type.embedded_load({:array, @p_dump_type}, nil, :json) ==
+             {:ok, nil}
+
+    assert Ecto.Type.embedded_dump({:array, @p_self_type}, [:foo], :json) ==
+             {:ok, [:foo]}
+
+    assert Ecto.Type.embedded_dump({:array, @p_self_type}, [nil], :json) ==
+             {:ok, [nil]}
+
+    assert Ecto.Type.embedded_dump({:array, @p_self_type}, nil, :json) ==
+             {:ok, nil}
+
+    assert Ecto.Type.embedded_dump({:array, @p_dump_type}, [:foo], :json) ==
+             {:ok, [{:dump, %{embed: :dump}}]}
+
+    assert Ecto.Type.embedded_dump({:array, @p_dump_type}, [nil], :json) ==
+             {:ok, [{:dump, %{embed: :dump}}]}
+
+    assert Ecto.Type.embedded_dump({:array, @p_dump_type}, nil, :json) ==
+             {:ok, nil}
+
+    assert Ecto.Type.load({:array, @p_self_type}, [:foo]) ==
+             {:ok, [{:load, %{embed: :self}}]}
+
+    assert Ecto.Type.load({:array, @p_self_type}, [nil]) ==
+             {:ok, [{:load, %{embed: :self}}]}
+
+    assert Ecto.Type.load({:array, @p_self_type}, nil) ==
+             {:ok, nil}
+
+    assert Ecto.Type.dump({:array, @p_self_type}, [:foo]) ==
+             {:ok, [{:dump, %{embed: :self}}]}
+
+    assert Ecto.Type.dump({:array, @p_self_type}, [nil]) ==
+             {:ok, [{:dump, %{embed: :self}}]}
+
+    assert Ecto.Type.dump({:array, @p_self_type}, nil) ==
+             {:ok, nil}
+
+    assert Ecto.Type.cast({:array, @p_self_type}, [:foo]) ==
+             {:ok, [{:cast, %{embed: :self}}]}
+
+    assert Ecto.Type.cast({:array, @p_self_type}, [nil]) ==
+             {:ok, [{:cast, %{embed: :self}}]}
+
+    assert Ecto.Type.cast({:array, @p_self_type}, nil) ==
+             {:ok, nil}
   end
 
   test "with map" do
     assert Ecto.Type.embed_as({:map, @p_dump_type}, :foo) == :dump
     assert Ecto.Type.embed_as({:map, @p_error_type}, :foo) == :self
 
-    assert Ecto.Type.embedded_load({:map, @p_self_type}, %{"x" => "foo"}, :json) == {:ok, %{"x" => :cast}}
-    assert Ecto.Type.embedded_load({:map, @p_self_type}, %{"x" => nil}, :json) == {:ok, %{"x" => :cast}}
-    assert Ecto.Type.embedded_load({:map, @p_self_type}, nil, :json) == {:ok, nil}
-    assert Ecto.Type.embedded_load({:map, @p_dump_type}, %{"x" => "foo"}, :json) == {:ok, %{"x" => :load}}
-    assert Ecto.Type.embedded_load({:map, @p_dump_type}, %{"x" => nil}, :json) == {:ok, %{"x" => :load}}
-    assert Ecto.Type.embedded_load({:map, @p_dump_type}, nil, :json) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:map, @p_self_type}, %{"x" => "foo"}, :json) ==
+             {:ok, %{"x" => {:cast, %{embed: :self}}}}
 
-    assert Ecto.Type.embedded_dump({:map, @p_self_type}, %{"x" => "foo"}, :json) == {:ok, %{"x" => "foo"}}
-    assert Ecto.Type.embedded_dump({:map, @p_self_type}, %{"x" => nil}, :json) == {:ok, %{"x" => nil}}
-    assert Ecto.Type.embedded_dump({:map, @p_self_type}, nil, :json) == {:ok, nil}
-    assert Ecto.Type.embedded_dump({:map, @p_dump_type}, %{"x" => "foo"}, :json) == {:ok, %{"x" => :dump}}
-    assert Ecto.Type.embedded_dump({:map, @p_dump_type}, %{"x" => nil}, :json) == {:ok, %{"x" => :dump}}
-    assert Ecto.Type.embedded_dump({:map, @p_dump_type}, nil, :json) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:map, @p_self_type}, %{"x" => nil}, :json) ==
+             {:ok, %{"x" => {:cast, %{embed: :self}}}}
 
-    assert Ecto.Type.load({:map, @p_self_type}, %{"x" => "foo"}) == {:ok, %{"x" => :load}}
-    assert Ecto.Type.load({:map, @p_self_type}, %{"x" => nil}) == {:ok, %{"x" => :load}}
-    assert Ecto.Type.load({:map, @p_self_type}, nil) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:map, @p_self_type}, nil, :json) ==
+             {:ok, nil}
 
-    assert Ecto.Type.dump({:map, @p_self_type}, %{"x" => "foo"}) == {:ok, %{"x" => :dump}}
-    assert Ecto.Type.dump({:map, @p_self_type}, %{"x" => nil}) == {:ok, %{"x" => :dump}}
-    assert Ecto.Type.dump({:map, @p_self_type}, nil) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:map, @p_dump_type}, %{"x" => "foo"}, :json) ==
+             {:ok, %{"x" => {:load, %{embed: :dump}}}}
 
-    assert Ecto.Type.cast({:map, @p_self_type}, %{"x" => "foo"}) == {:ok, %{"x" => :cast}}
-    assert Ecto.Type.cast({:map, @p_self_type}, %{"x" => nil}) == {:ok, %{"x" => :cast}}
-    assert Ecto.Type.cast({:map, @p_self_type}, nil) == {:ok, nil}
+    assert Ecto.Type.embedded_load({:map, @p_dump_type}, %{"x" => nil}, :json) ==
+             {:ok, %{"x" => {:load, %{embed: :dump}}}}
+
+    assert Ecto.Type.embedded_load({:map, @p_dump_type}, nil, :json) ==
+             {:ok, nil}
+
+    assert Ecto.Type.embedded_dump({:map, @p_self_type}, %{"x" => "foo"}, :json) ==
+             {:ok, %{"x" => "foo"}}
+
+    assert Ecto.Type.embedded_dump({:map, @p_self_type}, %{"x" => nil}, :json) ==
+             {:ok, %{"x" => nil}}
+
+    assert Ecto.Type.embedded_dump({:map, @p_self_type}, nil, :json) ==
+             {:ok, nil}
+
+    assert Ecto.Type.embedded_dump({:map, @p_dump_type}, %{"x" => "foo"}, :json) ==
+             {:ok, %{"x" => {:dump, %{embed: :dump}}}}
+
+    assert Ecto.Type.embedded_dump({:map, @p_dump_type}, %{"x" => nil}, :json) ==
+             {:ok, %{"x" => {:dump, %{embed: :dump}}}}
+
+    assert Ecto.Type.embedded_dump({:map, @p_dump_type}, nil, :json) ==
+             {:ok, nil}
+
+    assert Ecto.Type.load({:map, @p_self_type}, %{"x" => "foo"}) ==
+             {:ok, %{"x" => {:load, %{embed: :self}}}}
+
+    assert Ecto.Type.load({:map, @p_self_type}, %{"x" => nil}) ==
+             {:ok, %{"x" => {:load, %{embed: :self}}}}
+
+    assert Ecto.Type.load({:map, @p_self_type}, nil) ==
+             {:ok, nil}
+
+    assert Ecto.Type.dump({:map, @p_self_type}, %{"x" => "foo"}) ==
+             {:ok, %{"x" => {:dump, %{embed: :self}}}}
+
+    assert Ecto.Type.dump({:map, @p_self_type}, %{"x" => nil}) ==
+             {:ok, %{"x" => {:dump, %{embed: :self}}}}
+
+    assert Ecto.Type.dump({:map, @p_self_type}, nil) ==
+             {:ok, nil}
+
+    assert Ecto.Type.cast({:map, @p_self_type}, %{"x" => "foo"}) ==
+             {:ok, %{"x" => {:cast, %{embed: :self}}}}
+
+    assert Ecto.Type.cast({:map, @p_self_type}, %{"x" => nil}) ==
+             {:ok, %{"x" => {:cast, %{embed: :self}}}}
+
+    assert Ecto.Type.cast({:map, @p_self_type}, nil) ==
+             {:ok, nil}
   end
 
   test "with maybe" do
-    assert Ecto.Type.embedded_load({:maybe, @p_self_type}, :foo, :json) == {:ok, :cast}
-    assert Ecto.Type.embedded_load({:maybe, @p_dump_type}, :foo, :json) == {:ok, :load}
-    assert Ecto.Type.embedded_load({:maybe, @p_error_type}, :foo,  :json) == {:ok, :foo}
+    assert Ecto.Type.embedded_load({:maybe, @p_self_type}, :foo, :json) ==
+             {:ok, {:cast, %{embed: :self}}}
 
-    assert Ecto.Type.embedded_dump({:maybe, @p_self_type}, :foo,  :json) == {:ok, :foo}
-    assert Ecto.Type.embedded_dump({:maybe, @p_dump_type}, :foo,  :json) == {:ok, :dump}
-    assert Ecto.Type.embedded_dump({:maybe, @p_error_type}, :foo, :json) == {:ok, :foo}
+    assert Ecto.Type.embedded_load({:maybe, @p_dump_type}, :foo, :json) ==
+             {:ok, {:load, %{embed: :dump}}}
 
-    assert Ecto.Type.load({:maybe, @p_self_type}, :foo) == {:ok, :load}
-    assert Ecto.Type.load({:maybe, @p_error_type}, :foo) == {:ok, :foo}
+    assert Ecto.Type.embedded_load({:maybe, @p_error_type}, :foo, :json) ==
+             {:ok, :foo}
 
-    assert Ecto.Type.dump({:maybe, @p_self_type}, :foo) == {:ok, :dump}
-    assert Ecto.Type.dump({:maybe, @p_error_type}, :foo) == {:ok, :foo}
+    assert Ecto.Type.embedded_dump({:maybe, @p_self_type}, :foo, :json) ==
+             {:ok, :foo}
 
-    assert Ecto.Type.cast({:maybe, @p_self_type}, :foo) == {:ok, :cast}
-    assert Ecto.Type.cast({:maybe, @p_error_type}, :foo) == {:ok, :foo}
+    assert Ecto.Type.embedded_dump({:maybe, @p_dump_type}, :foo, :json) ==
+             {:ok, {:dump, %{embed: :dump}}}
+
+    assert Ecto.Type.embedded_dump({:maybe, @p_error_type}, :foo, :json) ==
+             {:ok, :foo}
+
+    assert Ecto.Type.load({:maybe, @p_self_type}, :foo) ==
+             {:ok, {:load, %{embed: :self}}}
+
+    assert Ecto.Type.load({:maybe, @p_error_type}, :foo) ==
+             {:ok, :foo}
+
+    assert Ecto.Type.dump({:maybe, @p_self_type}, :foo) ==
+             {:ok, {:dump, %{embed: :self}}}
+
+    assert Ecto.Type.dump({:maybe, @p_error_type}, :foo) ==
+             {:ok, :foo}
+
+    assert Ecto.Type.cast({:maybe, @p_self_type}, :foo) ==
+             {:ok, {:cast, %{embed: :self}}}
+
+    assert Ecto.Type.cast({:maybe, @p_error_type}, :foo) ==
+             {:ok, :foo}
   end
 
   defmodule MyParameterizedTypeForPrimaryKey do
@@ -193,9 +290,9 @@ defmodule Ecto.ParameterizedTypeTest do
         do: :init
 
     def type(_), do: :id
-    def load(_, _, _), do: {:ok, :load}
-    def dump(_, _, _), do: {:ok, :dump}
-    def cast(_, _), do: {:ok, :cast}
+    def load(_, _, _), do: {:ok, {:load, %{embed: :dump}}}
+    def dump(_, _, _), do: {:ok, {:dump, %{embed: :dump}}}
+    def cast(_, _), do: {:ok, {:cast, %{embed: :self}}}
   end
 
   defmodule SchemaWithParameterizedTypeAsPrimaryKey do
