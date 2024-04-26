@@ -40,6 +40,18 @@ defmodule Ecto.Schema.Loader do
   and that it may also require source-based renaming.
   """
   def unsafe_load(struct, types, map, loader) when is_map(map) do
+    {parametrized_types, non_parametrized_types} =
+      Enum.split_with(types, fn
+        {_field, {:parameterized, _type, _metadata}} -> true
+        _other -> false
+      end)
+
+    struct
+    |> do_unsafe_load(non_parametrized_types, map, loader)
+    |> do_unsafe_load(parametrized_types, map, loader)
+  end
+
+  defp do_unsafe_load(struct, types, map, loader) do
     Enum.reduce(types, struct, fn pair, acc ->
       {field, source, type} = field_source_and_type(pair)
 
@@ -68,6 +80,8 @@ defmodule Ecto.Schema.Loader do
 
   @compile {:inline, load!: 5}
   defp load!(struct, field, type, value, loader) do
+    type = load_params(type, struct)
+
     case loader.(type, value) do
       {:ok, value} ->
         value
@@ -77,6 +91,39 @@ defmodule Ecto.Schema.Loader do
               "cannot load `#{inspect(value)}` as type #{Ecto.Type.format(type)} " <>
                 "for field `#{field}`#{error_data(struct)}"
     end
+  end
+
+  # this can be added to ParameterizedType behaviour, just a naive implementation here
+  def load_params({:parameterized, module, %Ecto.Embedded{} = params}, _schema) do
+    {:parameterized, module, params}
+  end
+
+  def load_params({:parameterized, module, %{} = params}, schema) do
+    params =
+      for {key, value} <- params, into: %{} do
+        case value do
+          {:from, field} -> {key, Map.fetch!(schema, field)}
+          value -> {key, value}
+        end
+      end
+
+    {:parameterized, module, params}
+  end
+
+  def load_params({:parameterized, module, params}, schema) do
+    params =
+      for {key, value} <- params do
+        case value do
+          {:from, field} -> {key, Map.fetch!(schema, field)}
+          value -> {key, value}
+        end
+      end
+
+    {:parameterized, module, params}
+  end
+
+  def load_params(type, _schema) do
+    type
   end
 
   defp error_data(%{__struct__: atom}) do
@@ -97,9 +144,11 @@ defmodule Ecto.Schema.Loader do
       case dumper.(type, value) do
         {:ok, value} ->
           Map.put(acc, source, value)
+
         :error ->
-          raise ArgumentError, "cannot dump `#{inspect value}` as type #{Ecto.Type.format(type)} " <>
-                               "for field `#{field}` in schema #{inspect struct.__struct__}"
+          raise ArgumentError,
+                "cannot dump `#{inspect(value)}` as type #{Ecto.Type.format(type)} " <>
+                  "for field `#{field}` in schema #{inspect(struct.__struct__)}"
       end
     end)
   end

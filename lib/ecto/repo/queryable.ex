@@ -188,10 +188,13 @@ defmodule Ecto.Repo.Queryable do
   @doc """
   Load structs from query.
   """
+  # Will have to change order of types and values here to match how it was changed in Ecto.Schema.Loader
   def struct_load!([{field, type} | types], [value | values], acc, all_nil?, struct, adapter) do
     all_nil? = all_nil? and value == nil
     value = load!(type, value, field, struct, adapter)
-    struct_load!(types, values, [{field, value} | acc], all_nil?, struct, adapter)
+    acc = [{field, value} | acc]
+    struct = Map.merge(struct, Map.new(acc))
+    struct_load!(types, values, acc, all_nil?, struct, adapter)
   end
 
   def struct_load!([], values, _acc, true, _struct, _adapter) do
@@ -420,6 +423,8 @@ defmodule Ecto.Repo.Queryable do
 
   @compile {:inline, load!: 5}
   defp load!(type, value, field, struct, adapter) do
+    type = Ecto.Schema.Loader.load_params(type, struct)
+
     case Ecto.Type.adapter_load(adapter, type, value) do
       {:ok, value} ->
         value

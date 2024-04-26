@@ -1,5 +1,6 @@
 defmodule Ecto.ParameterizedTypeTest do
   use ExUnit.Case, async: true
+  alias Ecto.TestRepo
 
   defmodule MyParameterizedType do
     use Ecto.ParameterizedType
@@ -13,6 +14,7 @@ defmodule Ecto.ParameterizedTypeTest do
     def equal?(true, _, _), do: true
     def equal?(_, _, _), do: false
     def embed_as(_, %{embed: embed}), do: embed
+    def embed_as(_, _params), do: :dump
     def format(:format), do: "#MyParameterizedType<:format>"
   end
 
@@ -22,6 +24,15 @@ defmodule Ecto.ParameterizedTypeTest do
     @primary_key {:id, :binary_id, autogenerate: true}
     schema "" do
       field :my_type, MyParameterizedType, some_opt: :some_opt_value
+    end
+  end
+
+  defmodule SchemaWithFieldDependencies do
+    use Ecto.Schema
+
+    schema "" do
+      field :referenced_field, :string
+      field :my_type, MyParameterizedType, some_opt: {:from, :referenced_field}
     end
   end
 
@@ -44,15 +55,24 @@ defmodule Ecto.ParameterizedTypeTest do
               some_opt: :some_opt_value,
               field: :my_type,
               schema: Ecto.ParameterizedTypeTest.Schema}
+
+    assert SchemaWithFieldDependencies.__schema__(:type, :my_type) ==
+             {:parameterized, Ecto.ParameterizedTypeTest.MyParameterizedType,
+              some_opt: {:from, :referenced_field},
+              field: :my_type,
+              schema: Ecto.ParameterizedTypeTest.SchemaWithFieldDependencies}
   end
 
   @p_dump_type {:parameterized, MyParameterizedType, MyParameterizedType.params(:dump)}
   @p_self_type {:parameterized, MyParameterizedType, MyParameterizedType.params(:self)}
+  @p_dep_type {:parameterized, MyParameterizedType,
+               %{some_opt: {:from, :referenced_field}, embed: :dump}}
   @p_error_type {:parameterized, MyErrorParameterizedType, %{}}
 
   test "operations" do
     assert Ecto.Type.type(@p_self_type) == :custom
     assert Ecto.Type.type(@p_dump_type) == :custom
+    assert Ecto.Type.type(@p_dep_type) == :custom
     assert Ecto.Type.type({:maybe, @p_self_type}) == :custom
 
     assert Ecto.Type.embed_as(@p_self_type, :foo) == :self
@@ -275,6 +295,32 @@ defmodule Ecto.ParameterizedTypeTest do
 
     assert Ecto.Type.cast({:maybe, @p_error_type}, :foo) ==
              {:ok, :foo}
+  end
+
+  test "resolving referenced fields" do
+    Process.put(:test_repo_all_results, {1, [[1, "type_ref", %{}]]})
+
+    assert [
+             %SchemaWithFieldDependencies{
+               id: 1,
+               referenced_field: "type_ref",
+               my_type: {:load, params}
+             }
+           ] = TestRepo.all(SchemaWithFieldDependencies)
+
+    assert params[:some_opt] == "type_ref"
+
+    data = %{
+      referenced_field: "foo",
+      my_type: "{}"
+    }
+
+    assert %{
+             referenced_field: "foo",
+             my_type: {:load, params}
+           } = Ecto.embedded_load(SchemaWithFieldDependencies, data, :json)
+
+    assert params[:some_opt] == "foo"
   end
 
   defmodule MyParameterizedTypeForPrimaryKey do
